@@ -9,3 +9,8 @@ __pycache__/
 vector_store/
 data/
 *.log
+reports/
+
+# Cursor IDE 工作文件（不入库）
+.cursor/worktrees.json
+# .cursor/skills/ 和 .cursor/rules/ 需要入库，团队共享

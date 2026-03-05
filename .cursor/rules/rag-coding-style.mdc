@@ -1,0 +1,92 @@
+---
+description: RAG Web System 编码风格约束，确保代码一致性。
+globs: "app/**/*.py,tests/**/*.py,scripts/**/*.py"
+alwaysApply: false
+---
+
+# RAG Web System 编码风格
+
+## 语言与注释
+
+- 代码注释和 docstring 使用中文
+- 用户可见文本（错误消息、UI 标签、Prompt）使用中文
+- 变量名、函数名、类名使用英文
+- 日志消息可中英混合，但关键信息使用英文便于搜索
+
+## Python 风格
+
+- 所有模块文件首行添加 `from __future__ import annotations`（延迟注解评估）
+- 使用 `snake_case` 命名函数和变量
+- 使用 `PascalCase` 命名类
+- 使用 `_` 前缀标记私有成员（如 `_settings`、`_cache`）
+- 类型注解使用 Python 3.10+ 语法：`str | None` 而非 `Optional[str]`，`list[str]` 而非 `List[str]`
+
+## 导入规范
+
+- 按三组排序，组间空行分隔：
+  1. 标准库（`import os`, `from pathlib import Path`）
+  2. 第三方库（`from fastapi import FastAPI`, `from langchain_core.documents import Document`）
+  3. 项目内模块（`from app.core.config import Settings`）
+- 避免通配符导入（`from xxx import *`）
+
+## 异常处理
+
+- 业务异常继承自 `app.core.errors.RAGError`
+- 新增业务异常类需添加到 `app/core/errors.py`
+- 服务层（`app/rag/`、`app/eval/`）抛出具体业务异常
+- API 层（`app/main.py`）捕获业务异常转为 `HTTPException`
+- 使用 `raise ... from exc` 保留异常链
+- 不要吞掉异常（`except: pass`），至少记录日志
+
+## 配置管理
+
+- 所有可配置参数通过 `app/core/config.py` 的 `Settings` 类管理
+- 新增配置项需同步更新 `.env.example`
+- 使用 `Field(default=..., alias="ENV_VAR_NAME")` 定义
+- 敏感信息（API Key）不设默认值，强制从环境变量读取
+
+## Schema 规范
+
+- 请求/响应模型定义在 `app/schemas/rag.py`
+- 使用 Pydantic `BaseModel`
+- 为字段添加 `Field` 约束（`ge`、`le`、`default`）
+- Literal 类型约束枚举值（如 `search_type`）
+
+## 服务层设计
+
+- 每个服务类通过构造函数注入依赖
+- 服务类不直接调用 `get_settings()`，而是接收 `Settings` 参数
+- 可测试性优先：所有外部依赖可通过构造函数替换为 mock
+
+## 测试规范
+
+- 测试文件放在 `tests/` 目录
+- 测试函数以 `test_` 前缀命名
+- 使用 DummyXxx 类模拟外部服务（如 `DummyVectorStore`）
+- 不在测试中直接调用外部 API（Ollama、LLM）
+
+## 路径规范
+
+- 代码中使用 `pathlib.Path` 处理路径，不使用字符串拼接
+- 文档和配置中路径使用正斜杠 `/`
+
+## 日志规范
+
+- 使用 `logging.getLogger(__name__)` 获取 logger
+- 不使用 `print()` 输出运行信息
+- 日志格式：`时间 | 级别 | 模块 | 消息`
+- 关键操作记录 INFO 日志（入库数量、评估进度等）
+- 异常记录使用 `logger.exception()` 或 `logger.warning(..., exc_info=True)`
+
+## Gradio UI 规范
+
+- UI 组件定义在 `app/web/gradio_ui.py`
+- 使用 `build_gradio_ui()` 函数构建，接收 handler 回调
+- UI 不直接依赖服务实例，通过 handler 函数解耦
+- 常量（MODEL_CHOICES、SEARCH_TYPE_CHOICES 等）定义在文件顶部
+
+## 关联 Skill
+
+本 Rule 与 `.cursor/skills/rag-web-dev/SKILL.md` 互补：
+- Skill 记录架构设计、扩展指南和运维知识
+- Rule 约束日常编码风格和一致性
