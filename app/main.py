@@ -62,7 +62,7 @@ eval_embeddings = OllamaEmbeddings(
 evaluator = RagasEvaluator(llm=eval_llm, embeddings=eval_embeddings)
 testset_runner = TestsetRunner(pipeline=pipeline, evaluator=evaluator)
 
-app = FastAPI(title=settings.app_name, version="0.2.0")
+app = FastAPI(title=settings.app_name, version="0.3.0")
 
 
 @app.middleware("http")
@@ -119,6 +119,7 @@ def query(req: QueryRequest) -> QueryResponse:
             temperature=req.temperature,
             max_tokens=req.max_tokens,
             top_p=req.top_p,
+            model=req.model,
         )
         return QueryResponse(**result)
     except (RetrievalError, GenerationError) as exc:

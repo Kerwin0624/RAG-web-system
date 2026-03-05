@@ -45,6 +45,7 @@ class RAGPipeline:
         temperature: float = 0.2,
         max_tokens: int = 512,
         top_p: float = 1.0,
+        model: str | None = None,
     ) -> dict:
         started = time.perf_counter()
         key = self._cache_key(
@@ -58,6 +59,7 @@ class RAGPipeline:
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
+            model=model or "",
         )
         cached = self._read_cache(key)
         if cached is not None:
@@ -81,6 +83,7 @@ class RAGPipeline:
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
+            model=model,
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 

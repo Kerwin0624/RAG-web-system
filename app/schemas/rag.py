@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +29,7 @@ class QueryRequest(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=512, ge=32, le=4096)
     top_p: float = Field(default=1.0, ge=0.1, le=1.0)
+    model: str | None = Field(default=None, description="LLM model name override.")
 
 
 class RetrievedChunk(BaseModel):
@@ -58,5 +59,5 @@ class EvalRequest(BaseModel):
 
 
 class EvalResponse(BaseModel):
-    metrics: dict[str, float | str]
+    metrics: dict[str, Any]
     report_files: dict[str, str] | None = None

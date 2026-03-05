@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import csv
 import json
-from typing import Callable
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
 
 import gradio as gr
 
 from app.schemas.rag import EvalRequest, EvalSample, IngestRequest, QueryRequest
+
+# ── 常量 ────────────────────────────────────────────────────
 
 SEPARATOR_CHOICES = [
     ("\\n\\n（双换行）", "\n\n"),
@@ -23,6 +29,139 @@ SEPARATOR_LABELS = [label for label, _ in SEPARATOR_CHOICES]
 SEPARATOR_MAP = {label: value for label, value in SEPARATOR_CHOICES}
 DEFAULT_SEPARATOR_LABELS = ["\\n\\n（双换行）", "\\n（换行）", "空格", "无（空字符串）"]
 
+MODEL_CHOICES = [
+    ("Kimi K2.5", "kimi-k2.5"),
+    ("MiniMax M2.5", "MiniMax/MiniMax-M2.5"),
+    ("GLM-5", "glm-5"),
+    ("Qwen 3.5 Plus", "qwen3.5-plus"),
+    ("Qwen 3.5 Flash", "qwen3.5-flash"),
+    ("自定义模型", "__custom__"),
+]
+
+SEARCH_TYPE_CHOICES = [
+    ("向量相似度", "similarity"),
+    ("关键词检索（BM25）", "bm25"),
+    ("混合检索", "hybrid"),
+    ("MMR 多样性检索", "mmr"),
+]
+
+
+# ── 辅助函数 ────────────────────────────────────────────────
+
+def _resolve_model(dropdown_val: str, custom_val: str) -> str | None:
+    """从下拉选择和自定义输入框中解析出最终模型名。"""
+    if dropdown_val == "__custom__":
+        return custom_val.strip() or None
+    return dropdown_val or None
+
+
+def _build_ragas_chart(metrics: dict[str, float]) -> Any:
+    """用 matplotlib 绘制 RAGAS 柱状图 + 雷达图，返回 figure。"""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        return None
+
+    plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+
+    label_map = {
+        "context_precision": "上下文精度",
+        "context_recall": "上下文召回率",
+        "faithfulness": "忠实度",
+        "answer_relevancy": "答案相关性",
+        "retrieval_f1": "检索F1",
+    }
+    display_keys = ["context_precision", "context_recall", "faithfulness", "answer_relevancy", "retrieval_f1"]
+    labels = []
+    values = []
+    for k in display_keys:
+        if k in metrics:
+            labels.append(label_map.get(k, k))
+            values.append(metrics[k])
+
+    if not values:
+        return None
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    colors = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F"]
+
+    ax1 = axes[0]
+    bars = ax1.bar(labels, values, color=colors[: len(labels)], width=0.6, edgecolor="white", linewidth=0.8)
+    for bar, v in zip(bars, values):
+        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                 f"{v:.3f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
+    ax1.set_ylim(0, 1.15)
+    ax1.set_ylabel("分数")
+    ax1.set_title("RAGAS 评估指标")
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+
+    ax2 = axes[1]
+    n = len(labels)
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    values_closed = values + [values[0]]
+    angles_closed = angles + [angles[0]]
+
+    ax2 = fig.add_subplot(122, polar=True)
+    axes[1].set_visible(False)
+    ax2.plot(angles_closed, values_closed, "o-", linewidth=2, color="#4E79A7")
+    ax2.fill(angles_closed, values_closed, alpha=0.25, color="#4E79A7")
+    ax2.set_thetagrids(np.degrees(angles), labels)
+    ax2.set_ylim(0, 1.0)
+    ax2.set_title("雷达图", pad=20)
+
+    fig.tight_layout(pad=3.0)
+    return fig
+
+
+def _save_chart_to_file(fig: Any) -> str | None:
+    """将 matplotlib figure 保存为临时 PNG 文件，返回路径。"""
+    if fig is None:
+        return None
+    try:
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="ragas_chart_")
+        fig.savefig(tmp.name, dpi=150, bbox_inches="tight")
+        return tmp.name
+    except Exception:
+        return None
+
+
+def _save_json_to_file(data: Any, prefix: str = "export") -> str | None:
+    """将数据保存为临时 JSON 文件。"""
+    try:
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".json", delete=False, prefix=f"{prefix}_", mode="w", encoding="utf-8",
+        )
+        json.dump(data, tmp, ensure_ascii=False, indent=2)
+        tmp.close()
+        return tmp.name
+    except Exception:
+        return None
+
+
+def _save_csv_to_file(rows: list[dict], prefix: str = "export") -> str | None:
+    """将 dict 列表保存为临时 CSV 文件。"""
+    if not rows:
+        return None
+    try:
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".csv", delete=False, prefix=f"{prefix}_", mode="w", encoding="utf-8-sig", newline="",
+        )
+        writer = csv.DictWriter(tmp, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+        tmp.close()
+        return tmp.name
+    except Exception:
+        return None
+
+
+# ── UI 构建 ─────────────────────────────────────────────────
 
 def build_gradio_ui(
     query_handler: Callable[[QueryRequest], dict],
@@ -138,6 +277,25 @@ def build_gradio_ui(
 
         # ── Tab 2: 问答 ──────────────────────────────
         with gr.Tab("问答"):
+            gr.Markdown("### 模型选择")
+            with gr.Row():
+                qa_model = gr.Dropdown(
+                    label="大模型",
+                    choices=MODEL_CHOICES,
+                    value="kimi-k2.5",
+                    info="选择用于生成回答的大模型",
+                )
+                qa_custom_model = gr.Textbox(
+                    label="自定义模型名称",
+                    placeholder="输入百炼平台模型 API 名称",
+                    visible=False,
+                )
+
+            def _on_qa_model_change(val):
+                return gr.update(visible=(val == "__custom__"))
+
+            qa_model.change(_on_qa_model_change, inputs=[qa_model], outputs=[qa_custom_model])
+
             question = gr.Textbox(label="问题", placeholder="请输入问题", lines=3)
 
             gr.Markdown("### 检索设置")
@@ -152,12 +310,7 @@ def build_gradio_ui(
                 )
                 search_type = gr.Dropdown(
                     label="检索方式",
-                    choices=[
-                        ("向量相似度", "similarity"),
-                        ("关键词检索（BM25）", "bm25"),
-                        ("混合检索", "hybrid"),
-                        ("MMR 多样性检索", "mmr"),
-                    ],
+                    choices=SEARCH_TYPE_CHOICES,
                     value="similarity",
                 )
 
@@ -180,23 +333,14 @@ def build_gradio_ui(
                 )
 
             def _on_search_type_change(s_type):
-                is_hybrid = s_type == "hybrid"
-                return gr.update(visible=is_hybrid)
+                return gr.update(visible=s_type == "hybrid")
 
-            search_type.change(
-                _on_search_type_change,
-                inputs=[search_type],
-                outputs=[weight_row],
-            )
+            search_type.change(_on_search_type_change, inputs=[search_type], outputs=[weight_row])
 
             def _on_vector_weight_change(vw):
                 return round(1.0 - vw, 2)
 
-            vector_weight.change(
-                _on_vector_weight_change,
-                inputs=[vector_weight],
-                outputs=[bm25_weight],
-            )
+            vector_weight.change(_on_vector_weight_change, inputs=[vector_weight], outputs=[bm25_weight])
 
             with gr.Row():
                 reranker_enabled = gr.Checkbox(label="启用重排序", value=False, info="使用交叉编码器对检索结果重新排序")
@@ -214,8 +358,9 @@ def build_gradio_ui(
                 latency = gr.Textbox(label="耗时（毫秒）")
                 cache_tag = gr.Textbox(label="缓存命中")
 
-            def _ask(q, k, st, s_type, vw, bw, rerank, temp, m_toks, tp):
+            def _ask(q, k, st, s_type, vw, bw, rerank, temp, m_toks, tp, model_dd, model_custom):
                 try:
+                    model = _resolve_model(model_dd, model_custom)
                     req = QueryRequest(
                         question=q,
                         top_k=int(k),
@@ -227,6 +372,7 @@ def build_gradio_ui(
                         temperature=float(temp),
                         max_tokens=int(m_toks),
                         top_p=float(tp),
+                        model=model,
                     )
                     res = query_handler(req)
                     return (
@@ -244,6 +390,7 @@ def build_gradio_ui(
                     question, top_k, score_threshold, search_type,
                     vector_weight, bm25_weight, reranker_enabled,
                     temperature, max_tokens, top_p,
+                    qa_model, qa_custom_model,
                 ],
                 outputs=[answer, citations, latency, cache_tag],
             )
@@ -255,6 +402,25 @@ def build_gradio_ui(
                     "### 端到端 RAG 评测\n"
                     "系统会逐条将测试问题发送给 RAG 管线，将**实际回答**与 `rag_eval_set.json` 中的**标准答案**对比，"
                     "并可选运行 RAGAS 自动评估。"
+                )
+
+                gr.Markdown("### 模型选择")
+                with gr.Row():
+                    ts_model = gr.Dropdown(
+                        label="大模型",
+                        choices=MODEL_CHOICES,
+                        value="kimi-k2.5",
+                        info="选择用于评测的大模型",
+                    )
+                    ts_custom_model = gr.Textbox(
+                        label="自定义模型名称",
+                        placeholder="输入百炼平台模型 API 名称",
+                        visible=False,
+                    )
+
+                ts_model.change(
+                    lambda v: gr.update(visible=(v == "__custom__")),
+                    inputs=[ts_model], outputs=[ts_custom_model],
                 )
 
                 ts_path = gr.Textbox(
@@ -269,12 +435,7 @@ def build_gradio_ui(
                     ts_threshold = gr.Slider(label="相似度阈值", value=0.25, minimum=0.0, maximum=1.0, step=0.01)
                     ts_search_type = gr.Dropdown(
                         label="检索方式",
-                        choices=[
-                            ("向量相似度", "similarity"),
-                            ("关键词检索（BM25）", "bm25"),
-                            ("混合检索", "hybrid"),
-                            ("MMR 多样性检索", "mmr"),
-                        ],
+                        choices=SEARCH_TYPE_CHOICES,
                         value="similarity",
                     )
 
@@ -282,11 +443,10 @@ def build_gradio_ui(
                     ts_vw = gr.Slider(label="向量权重", value=0.7, minimum=0.0, maximum=1.0, step=0.05)
                     ts_bw = gr.Slider(label="关键词权重", value=0.3, minimum=0.0, maximum=1.0, step=0.05)
 
-                def _on_ts_search_change(s_type):
-                    return gr.update(visible=s_type == "hybrid")
-
-                ts_search_type.change(_on_ts_search_change, inputs=[ts_search_type], outputs=[ts_weight_row])
-
+                ts_search_type.change(
+                    lambda s: gr.update(visible=s == "hybrid"),
+                    inputs=[ts_search_type], outputs=[ts_weight_row],
+                )
                 ts_vw.change(lambda vw: round(1.0 - vw, 2), inputs=[ts_vw], outputs=[ts_bw])
 
                 with gr.Row():
@@ -309,25 +469,91 @@ def build_gradio_ui(
 
                 ts_status = gr.Textbox(label="评测状态", interactive=False)
 
+                # ── 参数快照 ──
+                gr.Markdown("### 本次评测参数")
+                ts_params_json = gr.JSON(label="参数快照")
+                ts_params_file = gr.File(label="下载参数快照（JSON）", interactive=False)
+
+                # ── 逐题结果 ──
                 gr.Markdown("### 逐题结果")
                 ts_table = gr.Dataframe(
                     headers=["ID", "问题", "标准答案", "模型回答", "类型", "难度", "检索数", "耗时(ms)", "状态"],
-                    label="逐题对比",
+                    label="逐题对比（点击任意行查看完整内容）",
                     wrap=True,
                     column_widths=[60, 160, 200, 200, 60, 60, 60, 70, 60],
                 )
 
+                # ── 逐题完整预览 ──
+                ts_full_data = gr.State([])
+                gr.Markdown("### 选中题目详情预览")
+                with gr.Row():
+                    detail_question = gr.Textbox(label="问题", interactive=False, lines=3)
+                with gr.Row():
+                    detail_gold = gr.Textbox(label="标准答案", interactive=False, lines=8)
+                    detail_model = gr.Textbox(label="模型回答", interactive=False, lines=8)
+                with gr.Row():
+                    detail_meta = gr.Textbox(label="元信息（类型 / 难度 / 检索数 / 耗时 / 状态）", interactive=False)
+
+                def _on_row_select(evt: gr.SelectData, full_data):
+                    idx = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+                    if not full_data or idx >= len(full_data):
+                        return "", "", "", ""
+                    r = full_data[idx]
+                    meta = f"类型: {r.get('question_type', '')} | 难度: {r.get('difficulty', '')} | 检索数: {r.get('contexts_count', '')} | 耗时: {r.get('elapsed_ms', '')}ms | 状态: {r.get('status', '')}"
+                    return r.get("question", ""), r.get("gold_answer", ""), r.get("model_answer", ""), meta
+
+                ts_table.select(
+                    _on_row_select,
+                    inputs=[ts_full_data],
+                    outputs=[detail_question, detail_gold, detail_model, detail_meta],
+                )
+
+                # ── RAGAS 评估指标 ──
                 gr.Markdown("### RAGAS 评估指标")
                 ts_metrics = gr.JSON(label="RAGAS Metrics")
+                ts_ragas_plot = gr.Plot(label="RAGAS 可视化图表")
+                with gr.Row():
+                    ts_chart_file = gr.File(label="下载 RAGAS 图表（PNG）", interactive=False)
+                    ts_ragas_detail_file = gr.File(label="下载 RAGAS 完整详情（JSON）", interactive=False)
 
+                # ── 完整详情 ──
                 gr.Markdown("### 完整详情（JSON）")
                 ts_detail = gr.JSON(label="全部逐题详情（含完整文本）")
 
                 def _truncate(s: str, limit: int = 100) -> str:
                     return s[:limit] + "…" if len(s) > limit else s
 
-                def _run_testset(path, s_type, k, st, vw, bw, rerank, temp, m_toks, tp, do_ragas):
+                def _run_testset(
+                    path, s_type, k, st, vw, bw, rerank, temp, m_toks, tp, do_ragas,
+                    c_size, c_overlap, sep_labels,
+                    model_dd, model_custom,
+                ):
                     try:
+                        model = _resolve_model(model_dd, model_custom)
+
+                        # --- 构建参数快照 ---
+                        seps_display = sep_labels if sep_labels else []
+                        search_type_display = dict(SEARCH_TYPE_CHOICES).get(s_type, s_type) if isinstance(s_type, str) else s_type
+                        params_snapshot = {
+                            "模型": model or "(默认)",
+                            "分块大小": int(c_size),
+                            "分块重叠": int(c_overlap),
+                            "分块分隔符": seps_display,
+                            "Top-K": int(k),
+                            "相似度阈值": float(st),
+                            "检索方式": s_type,
+                            "向量权重": float(vw),
+                            "关键词权重": float(bw),
+                            "启用重排序": "是" if rerank else "否",
+                            "温度": float(temp),
+                            "最大令牌数": int(m_toks),
+                            "Top-P": float(tp),
+                            "运行RAGAS": "是" if do_ragas else "否",
+                            "评测时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                        params_file = _save_json_to_file(params_snapshot, prefix="params")
+
+                        # --- 执行评测 ---
                         res = testset_eval_handler(
                             testset_path=path,
                             search_type=s_type,
@@ -340,6 +566,7 @@ def build_gradio_ui(
                             max_tokens=int(m_toks),
                             top_p=float(tp),
                             run_ragas=bool(do_ragas),
+                            model=model,
                         )
                         status_msg = (
                             f"评测完成！共 {res['total_questions']} 题，"
@@ -360,11 +587,52 @@ def build_gradio_ui(
                             ]
                             for r in res["per_question"]
                         ]
-                        metrics = res.get("ragas_metrics", {}) or {}
+                        full_data = res["per_question"]
+
+                        # --- RAGAS 指标处理 ---
+                        raw_ragas = res.get("ragas_metrics", {}) or {}
+                        metrics_display = {}
+                        chart_fig = None
+                        chart_path = None
+                        ragas_detail_path = None
+
+                        if "summary" in raw_ragas:
+                            metrics_display = raw_ragas["summary"]
+                            chart_fig = _build_ragas_chart(metrics_display)
+                            chart_path = _save_chart_to_file(chart_fig)
+                            ragas_detail_path = _save_json_to_file(raw_ragas, prefix="ragas_detail")
+                        elif "status" not in raw_ragas and raw_ragas:
+                            metrics_display = raw_ragas
+                        else:
+                            metrics_display = raw_ragas
+
                         detail = res["per_question"]
-                        return status_msg, rows, metrics, detail
+
+                        return (
+                            status_msg,
+                            params_snapshot,
+                            params_file,
+                            rows,
+                            full_data,
+                            metrics_display,
+                            chart_fig,
+                            chart_path,
+                            ragas_detail_path,
+                            detail,
+                        )
                     except Exception as exc:
-                        return f"评测失败: {exc}", [], {}, []
+                        return (
+                            f"评测失败: {exc}",
+                            {},
+                            None,
+                            [],
+                            [],
+                            {},
+                            None,
+                            None,
+                            None,
+                            [],
+                        )
 
                 ts_btn.click(
                     _run_testset,
@@ -372,8 +640,21 @@ def build_gradio_ui(
                         ts_path, ts_search_type, ts_top_k, ts_threshold,
                         ts_vw, ts_bw, ts_reranker,
                         ts_temp, ts_max_tok, ts_top_p, ts_run_ragas,
+                        chunk_size, chunk_overlap, separator_checkboxes,
+                        ts_model, ts_custom_model,
                     ],
-                    outputs=[ts_status, ts_table, ts_metrics, ts_detail],
+                    outputs=[
+                        ts_status,
+                        ts_params_json,
+                        ts_params_file,
+                        ts_table,
+                        ts_full_data,
+                        ts_metrics,
+                        ts_ragas_plot,
+                        ts_chart_file,
+                        ts_ragas_detail_file,
+                        ts_detail,
+                    ],
                 )
 
         # ── Tab 4: 自定义评估 ──────────────────────────────

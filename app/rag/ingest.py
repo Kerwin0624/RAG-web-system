@@ -25,7 +25,7 @@ def _load_pdf_with_mineru(path: Path) -> list[Document]:
     try:
         import magic_pdf.model as model_config
         from magic_pdf.data.data_reader_writer import FileBasedDataWriter
-        from magic_pdf.data.dataset import PymuDocDataset
+        from magic_pdf.data.dataset import PymuDocDataset, SupportedPdfParseMethod
         from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
     except ImportError as exc:
         raise IngestError(
@@ -43,7 +43,7 @@ def _load_pdf_with_mineru(path: Path) -> list[Document]:
 
         try:
             parse_method = ds.classify()
-            if parse_method == model_config.SupportedPdfParseMethod.OCR:
+            if parse_method == SupportedPdfParseMethod.OCR:
                 infer_result = ds.apply(doc_analyze, ocr=True)
                 pipe_result = infer_result.pipe_ocr_mode(image_writer)
             else:

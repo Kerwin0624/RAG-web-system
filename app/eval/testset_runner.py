@@ -34,6 +34,7 @@ class TestsetRunner:
         max_tokens: int = 512,
         top_p: float = 1.0,
         run_ragas: bool = False,
+        model: str | None = None,
     ) -> dict[str, Any]:
         path = Path(testset_path)
         with path.open("r", encoding="utf-8") as f:
@@ -60,6 +61,7 @@ class TestsetRunner:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    model=model,
                 )
                 model_answer = result["answer"]
                 contexts = [c["content"] for c in result["citations"]]
