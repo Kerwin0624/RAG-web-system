@@ -1,13 +1,18 @@
-# RAG Web System (LangChain 1.0+)
+# RAG Web System
 
-一个基于 **FastAPI + Gradio + LangChain 1.0+** 的检索增强生成（RAG）应用，包含：
+一套面向 **RAG 应用开发者**的完整开发框架，基于 **FastAPI + Gradio + LangChain 1.0+** 构建。
 
-- 检索模块：文档加载、分块、向量化、相似检索
-- 生成模块：基于检索上下文调用 LLM API 回答
-- 评估模块：基于 RAGAS 的自动化评估
-- Web 模块：可视化调参、问答交互、评估报告展示
+目标是让开发者在面对不同子项目时，能**快速进行针对性调优**，大幅提升迭代效率。
 
-## 1. 快速开始
+## 核心功能
+
+- **完整 RAG 流程**：文档上传、检索、问答一站式完成
+- **自动化评估**：基于测试集 + RAGAS 的系统化评估，支持逐题分析与可视化
+- **全链路可调参**：所有关键模块均支持参数调节，调参结果可保存，方便持续迭代
+- **多模型支持**：内置 5 种 LLM 可供切换，运行时动态选择
+- **主流 RAG 优化方法覆盖**：向量检索、BM25 关键词检索、混合检索、MMR 多样性检索、Reranker 重排序等（暂未加入父子索引等高级 RAG 技巧）
+
+## 快速开始
 
 ```bash
 python -m venv .venv
@@ -21,7 +26,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - API 文档：`http://127.0.0.1:8000/docs`
 - Gradio UI：`http://127.0.0.1:8000/ui`
 
-## 2. 目录结构
+## 目录结构
 
 ```text
 app/
@@ -33,7 +38,7 @@ app/
 tests/          # 单元与集成测试
 ```
 
-## 3. 配置说明
+## 配置说明
 
 核心环境变量位于 `.env.example`：
 - Embedding 本地模型：`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_DEVICE`
@@ -41,7 +46,7 @@ tests/          # 单元与集成测试
 - LLM API：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`
 - 检索/生成默认参数：`SEARCH_TOP_K`、`DEFAULT_TEMPERATURE` 等
 
-## 4. 部署
+## 部署
 
 ```bash
 docker compose up --build
