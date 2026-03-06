@@ -1,6 +1,6 @@
 [project]
 name = "rag-web-system"
-version = "0.1.0"
+version = "0.4.0"
 description = "LangChain 1.0+ based RAG web system with FastAPI, Gradio, and RAGAS."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,9 @@ dev = [
   "httpx>=0.27.0",
   "ruff>=0.6.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

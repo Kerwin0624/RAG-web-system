@@ -62,7 +62,7 @@ eval_embeddings = OllamaEmbeddings(
 evaluator = RagasEvaluator(llm=eval_llm, embeddings=eval_embeddings)
 testset_runner = TestsetRunner(pipeline=pipeline, evaluator=evaluator)
 
-app = FastAPI(title=settings.app_name, version="0.3.0")
+app = FastAPI(title=settings.app_name, version="0.4.0")
 
 
 @app.middleware("http")

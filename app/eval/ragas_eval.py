@@ -17,6 +17,60 @@ def _f1(precision: float, recall: float) -> float:
     return 2.0 * precision * recall / total
 
 
+# 默认指标目标（得分低于目标时给出优化建议）
+DEFAULT_TARGET_FAITHFULNESS = 0.85
+DEFAULT_TARGET_ANSWER_RELEVANCY = 0.8
+DEFAULT_TARGET_CONTEXT_RECALL = 0.8
+DEFAULT_TARGET_CONTEXT_PRECISION = 0.7
+
+
+def get_optimization_suggestions(
+    summary: dict[str, float],
+    *,
+    target_faithfulness: float = DEFAULT_TARGET_FAITHFULNESS,
+    target_answer_relevancy: float = DEFAULT_TARGET_ANSWER_RELEVANCY,
+    target_context_recall: float = DEFAULT_TARGET_CONTEXT_RECALL,
+    target_context_precision: float = DEFAULT_TARGET_CONTEXT_PRECISION,
+) -> list[str]:
+    """根据 RAGAS 汇总指标与用户设定的目标，对未达标项生成优化方向建议。"""
+    suggestions: list[str] = []
+    cp = summary.get("context_precision", 1.0)
+    cr = summary.get("context_recall", 1.0)
+    fa = summary.get("faithfulness", 1.0)
+    ar = summary.get("answer_relevancy", 1.0)
+    rf1 = summary.get("retrieval_f1", 1.0)
+
+    if cp < target_context_precision:
+        suggestions.append(
+            f"**Context Precision 未达目标（当前 {cp:.3f} < {target_context_precision}）**："
+            "检索到的片段中无关内容较多。建议：启用重排序（Reranker）、适当提高相似度阈值，或优化分块/分隔符减少噪声。"
+        )
+    if cr < target_context_recall:
+        suggestions.append(
+            f"**Context Recall 未达目标（当前 {cr:.3f} < {target_context_recall}）**："
+            "相关文档未充分检索到。建议：适当增大 Top-K、尝试混合检索或 MMR，或调整分块大小/重叠以更好覆盖知识点。"
+        )
+    if fa < target_faithfulness:
+        suggestions.append(
+            f"**Faithfulness 未达目标（当前 {fa:.3f} < {target_faithfulness}）**："
+            "回答存在未基于上下文的内容。建议：强化「仅依据上下文作答」的 prompt、适当降低温度，或先提升检索质量再生成。"
+        )
+    if ar < target_answer_relevancy:
+        suggestions.append(
+            f"**Answer Relevancy 未达目标（当前 {ar:.3f} < {target_answer_relevancy}）**："
+            "回答与问题匹配度不足。建议：检查问题表述与知识库覆盖范围、优化 prompt 或尝试更强模型。"
+        )
+    rf1_target = min(target_context_precision, target_context_recall)
+    if rf1 < rf1_target and not (cp < target_context_precision or cr < target_context_recall):
+        suggestions.append(
+            f"**检索综合表现未达预期（Retrieval F1 {rf1:.3f}）**："
+            "可尝试启用重排序、混合检索，或微调 Top-K 与相似度阈值。"
+        )
+    if not suggestions:
+        suggestions.append("当前 RAGAS 各维度均达到或超过设定目标，可维持现有参数或针对业务场景做小幅调优。")
+    return suggestions
+
+
 class RagasEvaluator:
     def __init__(self, llm: Any = None, embeddings: Any = None):
         self._llm = llm

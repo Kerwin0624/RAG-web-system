@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.eval.ragas_eval import RagasEvaluator
+from app.eval.ragas_eval import RagasEvaluator, get_optimization_suggestions
 from app.rag.pipeline import RAGPipeline
 from app.schemas.rag import EvalSample
 
@@ -35,6 +35,10 @@ class TestsetRunner:
         top_p: float = 1.0,
         run_ragas: bool = False,
         model: str | None = None,
+        ragas_target_faithfulness: float = 0.85,
+        ragas_target_answer_relevancy: float = 0.8,
+        ragas_target_context_recall: float = 0.8,
+        ragas_target_context_precision: float = 0.7,
     ) -> dict[str, Any]:
         path = Path(testset_path)
         with path.open("r", encoding="utf-8") as f:
@@ -101,6 +105,14 @@ class TestsetRunner:
         if run_ragas and eval_samples:
             try:
                 ragas_metrics = self._evaluator.evaluate_samples(eval_samples)
+                if "summary" in ragas_metrics:
+                    ragas_metrics["optimization_suggestions"] = get_optimization_suggestions(
+                        ragas_metrics["summary"],
+                        target_faithfulness=ragas_target_faithfulness,
+                        target_answer_relevancy=ragas_target_answer_relevancy,
+                        target_context_recall=ragas_target_context_recall,
+                        target_context_precision=ragas_target_context_precision,
+                    )
             except Exception as exc:
                 logger.exception("RAGAS evaluation failed")
                 ragas_metrics = {"status": "error", "reason": str(exc)}

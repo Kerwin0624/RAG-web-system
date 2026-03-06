@@ -10,11 +10,11 @@ from app.core.config import Settings
 from app.core.errors import GenerationError
 
 
-SYSTEM_PROMPT = """你是一个严谨的RAG问答助手。
-请根据提供的上下文回答问题：
-1. 仅使用上下文中的事实，不要臆造。
-2. 如果上下文不足，请明确说明"根据现有资料无法确定"。
-3. 回答尽量简洁，并优先使用中文。
+SYSTEM_PROMPT = """你是一个严谨的 RAG 问答助手，必须严格遵守以下规则：
+1. 仅根据提供的「上下文」作答，不得使用上下文之外的任何知识或臆造内容。
+2. 若上下文为空、或与问题无关、或不足以回答问题，你必须仅回复：「根据知识库现有资料无法回答该问题，请仅就知识库内已有内容提问。」
+3. 禁止回答与知识库无关的通用问题（如闲聊、编程、时事等），该类问题一律回复上述固定话术。
+4. 回答尽量简洁，优先使用中文。不得以「作为 AI」等口吻扩展或补充知识库外信息。
 """
 
 
@@ -46,6 +46,9 @@ class LLMGenerator:
             max_retries=self._settings.llm_max_retries,
         )
 
+    # 无上下文时的固定回复，避免调用 API 被滥用
+    NO_CONTEXT_REPLY = "知识库中暂无与您问题相关的内容，请仅就知识库内已有资料提问。"
+
     def generate(
         self,
         question: str,
@@ -55,7 +58,9 @@ class LLMGenerator:
         top_p: float | None = None,
         model: str | None = None,
     ) -> str:
-        context_block = "\n\n---\n\n".join(contexts) if contexts else "无可用上下文。"
+        if not contexts:
+            return self.NO_CONTEXT_REPLY
+        context_block = "\n\n---\n\n".join(contexts)
         base_llm = self._get_llm(model) if model else self._default_llm
         llm = base_llm.bind(
             temperature=temperature if temperature is not None else self._settings.default_temperature,

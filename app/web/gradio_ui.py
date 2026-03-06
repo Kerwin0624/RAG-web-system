@@ -181,7 +181,7 @@ def build_gradio_ui(
                     label="PDF 解析引擎",
                     choices=["pypdf", "mineru"],
                     value="pypdf",
-                    info="MinerU 解析更精准，需额外安装 magic-pdf",
+                    info="成本：pypdf 无额外成本；MinerU 需本地算力，入库略慢。效率：MinerU 解析更精准、表格/公式保留更好，检索质量更高。",
                 )
 
             with gr.Row():
@@ -210,7 +210,7 @@ def build_gradio_ui(
                     minimum=100,
                     maximum=4000,
                     step=50,
-                    info="每个文本块的最大字符数",
+                    info="成本：块越大，单次检索上下文越多，可能增加 LLM token 消耗。效率：800 左右兼顾语义完整与检索精度；过大易含噪声，过小易断句。",
                 )
                 chunk_overlap = gr.Slider(
                     label="分块重叠",
@@ -218,14 +218,14 @@ def build_gradio_ui(
                     minimum=0,
                     maximum=1000,
                     step=10,
-                    info="相邻文本块之间的重叠字符数",
+                    info="成本：重叠多则块数略增，向量存储与检索略增。效率：约 15% 重叠可减少边界断句，提升召回；过大重复多、冗余增加。",
                 )
 
             separator_checkboxes = gr.CheckboxGroup(
                 label="分块分隔符（按优先级排列，从上到下依次尝试）",
                 choices=SEPARATOR_LABELS,
                 value=DEFAULT_SEPARATOR_LABELS,
-                info="选择用于切分文本的分隔符",
+                info="成本：无额外成本。效率：分隔符决定切分质量，双换行/句号等利于保持语义完整，从而提升检索与回答质量。",
             )
 
             ingest_btn = gr.Button("开始入库", variant="primary")
@@ -283,7 +283,7 @@ def build_gradio_ui(
                     label="大模型",
                     choices=MODEL_CHOICES,
                     value="kimi-k2.5",
-                    info="选择用于生成回答的大模型",
+                    info="成本：不同厂商/型号按 token 计费差异大，Plus 类通常比 Flash 贵、质量更好。效率：大模型响应速度与并发能力不同，影响首 token 与总耗时。",
                 )
                 qa_custom_model = gr.Textbox(
                     label="自定义模型名称",
@@ -300,18 +300,27 @@ def build_gradio_ui(
 
             gr.Markdown("### 检索设置")
             with gr.Row():
-                top_k = gr.Slider(label="检索数量（Top-K）", value=4, minimum=1, maximum=20, step=1)
+                top_k = gr.Slider(
+                    label="检索数量（Top-K）",
+                    value=4,
+                    minimum=1,
+                    maximum=20,
+                    step=1,
+                    info="成本：K 越大送入 LLM 的上下文越多，token 消耗与费用上升。效率：K 大召回更全但延迟与噪音增加；4–8 为常用折中。",
+                )
                 score_threshold = gr.Slider(
                     label="相似度阈值",
                     value=0.25,
                     minimum=0.0,
                     maximum=1.0,
                     step=0.01,
+                    info="成本：阈值越高过滤越多，实际送入 LLM 的 token 越少，成本与耗时降低。效率：过高易漏检，过低易带入无关片段影响答案质量。",
                 )
                 search_type = gr.Dropdown(
                     label="检索方式",
                     choices=SEARCH_TYPE_CHOICES,
                     value="similarity",
+                    info="成本：向量≈BM25＜混合＜MMR；混合/MMR 计算更多。效率：混合兼顾语义+关键词；MMR 多样性好；纯向量适合通用语义问句。",
                 )
 
             with gr.Row(visible=False) as weight_row:
@@ -321,7 +330,7 @@ def build_gradio_ui(
                     minimum=0.0,
                     maximum=1.0,
                     step=0.05,
-                    info="混合检索中向量相似度的权重",
+                    info="成本：无直接变化。效率：向量高偏语义理解，BM25 高偏精确词匹配；0.7/0.3 为常见平衡，可按业务调。",
                 )
                 bm25_weight = gr.Slider(
                     label="关键词权重",
@@ -329,7 +338,7 @@ def build_gradio_ui(
                     minimum=0.0,
                     maximum=1.0,
                     step=0.05,
-                    info="混合检索中 BM25 关键词的权重",
+                    info="成本：无直接变化。效率：与向量权重互补；术语、代码、专有名词多时可适当提高。",
                 )
 
             def _on_search_type_change(s_type):
@@ -343,13 +352,38 @@ def build_gradio_ui(
             vector_weight.change(_on_vector_weight_change, inputs=[vector_weight], outputs=[bm25_weight])
 
             with gr.Row():
-                reranker_enabled = gr.Checkbox(label="启用重排序", value=False, info="使用交叉编码器对检索结果重新排序")
+                reranker_enabled = gr.Checkbox(
+                    label="启用重排序",
+                    value=False,
+                    info="成本：需多取候选再精排，检索阶段耗时与算力增加；不增加 LLM 费用。效率：显著提升 Top-K 内排序质量，适合对准确率要求高的场景。",
+                )
 
             gr.Markdown("### 生成设置")
             with gr.Row():
-                temperature = gr.Slider(label="温度（Temperature）", value=0.2, minimum=0.0, maximum=2.0, step=0.05)
-                max_tokens = gr.Slider(label="最大令牌数", value=512, minimum=32, maximum=4096, step=32)
-                top_p = gr.Slider(label="采样阈值（Top-P）", value=1.0, minimum=0.1, maximum=1.0, step=0.05)
+                temperature = gr.Slider(
+                    label="温度（Temperature）",
+                    value=0.2,
+                    minimum=0.0,
+                    maximum=2.0,
+                    step=0.05,
+                    info="成本：不直接改变计费。效率：低温度回答更稳定、更贴上下文，RAG 推荐 0.1–0.3；高温度创意多但易偏题。",
+                )
+                max_tokens = gr.Slider(
+                    label="最大令牌数",
+                    value=512,
+                    minimum=32,
+                    maximum=4096,
+                    step=32,
+                    info="成本：按输出 token 计费，上限越大单次回答可能越贵。效率：设足可避免截断，过大则冗长且耗时长；512 适合多数问答。",
+                )
+                top_p = gr.Slider(
+                    label="采样阈值（Top-P）",
+                    value=1.0,
+                    minimum=0.1,
+                    maximum=1.0,
+                    step=0.05,
+                    info="成本：不直接改变计费。效率：1.0 不截断词表；降低可减少随机性、回答更集中，与低 temperature 类似。",
+                )
 
             ask_btn = gr.Button("生成回答", variant="primary")
             answer = gr.Textbox(label="回答", lines=8)
@@ -410,7 +444,7 @@ def build_gradio_ui(
                         label="大模型",
                         choices=MODEL_CHOICES,
                         value="kimi-k2.5",
-                        info="选择用于评测的大模型",
+                        info="成本：不同厂商/型号按 token 计费差异大。效率：影响每条题的响应速度与评测总耗时。",
                     )
                     ts_custom_model = gr.Textbox(
                         label="自定义模型名称",
@@ -431,17 +465,46 @@ def build_gradio_ui(
 
                 gr.Markdown("### 检索设置")
                 with gr.Row():
-                    ts_top_k = gr.Slider(label="检索数量（Top-K）", value=4, minimum=1, maximum=20, step=1)
-                    ts_threshold = gr.Slider(label="相似度阈值", value=0.25, minimum=0.0, maximum=1.0, step=0.01)
+                    ts_top_k = gr.Slider(
+                        label="检索数量（Top-K）",
+                        value=4,
+                        minimum=1,
+                        maximum=20,
+                        step=1,
+                        info="成本：K 越大单题 token 越多，批量评测总成本上升。效率：影响每题检索与生成耗时。",
+                    )
+                    ts_threshold = gr.Slider(
+                        label="相似度阈值",
+                        value=0.25,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.01,
+                        info="成本：阈值高则送入 LLM 的上下文少，单题与总成本降低。效率：过高易漏检，影响评测得分。",
+                    )
                     ts_search_type = gr.Dropdown(
                         label="检索方式",
                         choices=SEARCH_TYPE_CHOICES,
                         value="similarity",
+                        info="成本：向量＜混合＜MMR。效率：混合/MMR 检索更耗时但可能提升召回与评测指标。",
                     )
 
                 with gr.Row(visible=False) as ts_weight_row:
-                    ts_vw = gr.Slider(label="向量权重", value=0.7, minimum=0.0, maximum=1.0, step=0.05)
-                    ts_bw = gr.Slider(label="关键词权重", value=0.3, minimum=0.0, maximum=1.0, step=0.05)
+                    ts_vw = gr.Slider(
+                        label="向量权重",
+                        value=0.7,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="成本：无直接变化。效率：与关键词权重互补，影响检索排序与评测表现。",
+                    )
+                    ts_bw = gr.Slider(
+                        label="关键词权重",
+                        value=0.3,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="成本：无直接变化。效率：术语多时可适当提高，改善检索与答案质量。",
+                    )
 
                 ts_search_type.change(
                     lambda s: gr.update(visible=s == "hybrid"),
@@ -450,19 +513,79 @@ def build_gradio_ui(
                 ts_vw.change(lambda vw: round(1.0 - vw, 2), inputs=[ts_vw], outputs=[ts_bw])
 
                 with gr.Row():
-                    ts_reranker = gr.Checkbox(label="启用重排序", value=False)
+                    ts_reranker = gr.Checkbox(
+                        label="启用重排序",
+                        value=False,
+                        info="成本：检索阶段耗时增加，不增加 LLM 费用。效率：提升排序质量，评测时更易反映真实能力。",
+                    )
 
                 gr.Markdown("### 生成设置")
                 with gr.Row():
-                    ts_temp = gr.Slider(label="温度", value=0.2, minimum=0.0, maximum=2.0, step=0.05)
-                    ts_max_tok = gr.Slider(label="最大令牌数", value=512, minimum=32, maximum=4096, step=32)
-                    ts_top_p = gr.Slider(label="Top-P", value=1.0, minimum=0.1, maximum=1.0, step=0.05)
+                    ts_temp = gr.Slider(
+                        label="温度",
+                        value=0.2,
+                        minimum=0.0,
+                        maximum=2.0,
+                        step=0.05,
+                        info="成本：不直接改变计费。效率：低温度结果更稳定，便于评测对比。",
+                    )
+                    ts_max_tok = gr.Slider(
+                        label="最大令牌数",
+                        value=512,
+                        minimum=32,
+                        maximum=4096,
+                        step=32,
+                        info="成本：上限越大单题可能越贵，批量评测总成本上升。效率：足够即可，过大增加耗时。",
+                    )
+                    ts_top_p = gr.Slider(
+                        label="Top-P",
+                        value=1.0,
+                        minimum=0.1,
+                        maximum=1.0,
+                        step=0.05,
+                        info="成本：不直接改变计费。效率：与温度配合，影响回答稳定性与评测一致性。",
+                    )
 
                 with gr.Row():
                     ts_run_ragas = gr.Checkbox(
                         label="运行 RAGAS 评估指标（耗时较长）",
                         value=False,
-                        info="需要 LLM 额外调用，20 条约需数分钟",
+                        info="成本：RAGAS 需额外 LLM 调用（生成与评估），显著增加 token 消耗与费用。效率：20 条约需数分钟，适合做深度质量评估时开启。",
+                    )
+
+                gr.Markdown("### 指标目标（RAGAS 得分低于目标时将给出优化建议）")
+                with gr.Row():
+                    ts_target_faithfulness = gr.Number(
+                        label="Faithfulness 目标",
+                        value=0.85,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="忠实度：回答是否严格基于上下文",
+                    )
+                    ts_target_answer_relevancy = gr.Number(
+                        label="Answer Relevancy 目标",
+                        value=0.8,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="答案相关性：回答与问题的匹配度",
+                    )
+                    ts_target_context_recall = gr.Number(
+                        label="Context Recall 目标",
+                        value=0.8,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="上下文召回：相关文档是否被检索到",
+                    )
+                    ts_target_context_precision = gr.Number(
+                        label="Context Precision 目标",
+                        value=0.7,
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        info="上下文精度：检索片段中相关内容的占比",
                     )
 
                 ts_btn = gr.Button("开始评测", variant="primary")
@@ -512,6 +635,10 @@ def build_gradio_ui(
                 gr.Markdown("### RAGAS 评估指标")
                 ts_metrics = gr.JSON(label="RAGAS Metrics")
                 ts_ragas_plot = gr.Plot(label="RAGAS 可视化图表")
+                gr.Markdown("### 优化方向建议")
+                ts_ragas_suggestions = gr.Markdown(
+                    value="完成 RAGAS 评测并勾选「运行 RAGAS 评估指标」后，将根据各维度得分给出优化建议。",
+                )
                 with gr.Row():
                     ts_chart_file = gr.File(label="下载 RAGAS 图表（PNG）", interactive=False)
                     ts_ragas_detail_file = gr.File(label="下载 RAGAS 完整详情（JSON）", interactive=False)
@@ -525,11 +652,16 @@ def build_gradio_ui(
 
                 def _run_testset(
                     path, s_type, k, st, vw, bw, rerank, temp, m_toks, tp, do_ragas,
+                    t_fa, t_ar, t_cr, t_cp,
                     c_size, c_overlap, sep_labels,
                     model_dd, model_custom,
                 ):
                     try:
                         model = _resolve_model(model_dd, model_custom)
+                        target_fa = float(t_fa) if t_fa is not None else 0.85
+                        target_ar = float(t_ar) if t_ar is not None else 0.8
+                        target_cr = float(t_cr) if t_cr is not None else 0.8
+                        target_cp = float(t_cp) if t_cp is not None else 0.7
 
                         # --- 构建参数快照 ---
                         seps_display = sep_labels if sep_labels else []
@@ -549,6 +681,7 @@ def build_gradio_ui(
                             "最大令牌数": int(m_toks),
                             "Top-P": float(tp),
                             "运行RAGAS": "是" if do_ragas else "否",
+                            "指标目标": {"Faithfulness": target_fa, "Answer Relevancy": target_ar, "Context Recall": target_cr, "Context Precision": target_cp},
                             "评测时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         }
                         params_file = _save_json_to_file(params_snapshot, prefix="params")
@@ -567,6 +700,10 @@ def build_gradio_ui(
                             top_p=float(tp),
                             run_ragas=bool(do_ragas),
                             model=model,
+                            ragas_target_faithfulness=target_fa,
+                            ragas_target_answer_relevancy=target_ar,
+                            ragas_target_context_recall=target_cr,
+                            ragas_target_context_precision=target_cp,
                         )
                         status_msg = (
                             f"评测完成！共 {res['total_questions']} 题，"
@@ -606,6 +743,11 @@ def build_gradio_ui(
                         else:
                             metrics_display = raw_ragas
 
+                        suggestions_md = "完成 RAGAS 评测并勾选「运行 RAGAS 评估指标」后，将根据各维度得分给出优化建议。"
+                        if "optimization_suggestions" in raw_ragas:
+                            sugg = raw_ragas["optimization_suggestions"]
+                            suggestions_md = "#### 优化方向建议\n\n" + "\n\n".join(sugg)
+
                         detail = res["per_question"]
 
                         return (
@@ -618,6 +760,7 @@ def build_gradio_ui(
                             chart_fig,
                             chart_path,
                             ragas_detail_path,
+                            suggestions_md,
                             detail,
                         )
                     except Exception as exc:
@@ -631,6 +774,7 @@ def build_gradio_ui(
                             None,
                             None,
                             None,
+                            "",
                             [],
                         )
 
@@ -640,6 +784,8 @@ def build_gradio_ui(
                         ts_path, ts_search_type, ts_top_k, ts_threshold,
                         ts_vw, ts_bw, ts_reranker,
                         ts_temp, ts_max_tok, ts_top_p, ts_run_ragas,
+                        ts_target_faithfulness, ts_target_answer_relevancy,
+                        ts_target_context_recall, ts_target_context_precision,
                         chunk_size, chunk_overlap, separator_checkboxes,
                         ts_model, ts_custom_model,
                     ],
@@ -653,6 +799,7 @@ def build_gradio_ui(
                         ts_ragas_plot,
                         ts_chart_file,
                         ts_ragas_detail_file,
+                        ts_ragas_suggestions,
                         ts_detail,
                     ],
                 )
