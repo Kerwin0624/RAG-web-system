@@ -1,5 +1,7 @@
 # RAG Web System 开发指南 Skill
 
+**版本：0.2**（与项目 v0.4 迭代经验同步）
+
 > 本 Skill 为 **RAG Web System** 项目的完整开发指南。  
 > 面向新成员快速上手、日常开发与架构扩展。所有路径使用正斜杠 `/`。
 
@@ -119,10 +121,13 @@ python scripts/check_env.py
 **7) 启动服务**
 
 ```bash
-# 开发模式
+# 开发模式（macOS / Linux）
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# 生产模式
+# 开发模式（Windows，若遇 WinError 10013 权限错误则改用 127.0.0.1）
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# 生产模式（macOS / Linux）
 gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 app.main:app
 
 # Docker
@@ -153,19 +158,22 @@ rag-web-system/
 │   │   ├── pipeline.py         # RAG 主管线（检索→生成→缓存）
 │   │   ├── ingest.py           # 文档加载、分块、入库
 │   │   ├── retriever.py        # 4 种检索策略实现
-│   │   ├── generator.py        # LLM 生成（多模型支持）
+│   │   ├── generator.py        # LLM 生成（多模型支持 + 仅答知识库）
 │   │   ├── vector_store.py     # Chroma 向量存储
 │   │   ├── bm25_store.py       # BM25 关键词索引（jieba 分词）
 │   │   └── reranker.py         # CrossEncoder 重排序（懒加载）
 │   ├── eval/
-│   │   ├── ragas_eval.py       # RAGAS 评估器
-│   │   ├── testset_runner.py   # 测试集批量运行
+│   │   ├── ragas_eval.py       # RAGAS 评估器 + 优化建议生成
+│   │   ├── testset_runner.py   # 测试集批量运行（含指标目标传递）
 │   │   ├── dataset_builder.py  # HuggingFace Dataset 构建
 │   │   └── reporting.py        # 评估报告导出（JSON/CSV）
 │   ├── schemas/
 │   │   └── rag.py              # Pydantic 请求/响应模型
 │   └── web/
-│       └── gradio_ui.py        # Gradio 4-Tab 界面
+│       └── gradio_ui.py        # Gradio 4-Tab 界面（含成本/效率提示）
+├── docs/
+│   ├── preview/                # 功能/界面预览截图（6 张）
+│   └── release-notes-v0.4.md   # v0.4 版本发布说明
 ├── tests/
 │   ├── test_retrieval.py       # 入库+检索集成测试
 │   ├── test_generation.py      # Pipeline 缓存测试
@@ -174,6 +182,8 @@ rag-web-system/
 │   └── check_env.py            # 环境检测脚本
 ├── data/                       # 文档存放目录
 ├── vector_store/               # 向量库持久化目录
+├── README.md                   # 项目说明（含功能/界面预览）
+├── .gitignore                  # Git 忽略规则
 ├── pyproject.toml              # 项目元数据与依赖
 ├── Dockerfile                  # Docker 镜像
 ├── docker-compose.yml          # 编排配置
@@ -187,8 +197,36 @@ rag-web-system/
 
 所有参数通过 `app/core/config.py` 中 `Settings` 类管理，支持 `.env` 文件和环境变量。
 
+#### 应用与基础设施
+
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
+| `APP_NAME` | RAG Web System | 应用名称（显示在 FastAPI docs） |
+| `APP_ENV` | dev | 运行环境标识 |
+| `HOST` | 0.0.0.0 | 监听地址（Windows 若遇权限错误可改 127.0.0.1） |
+| `PORT` | 8000 | 监听端口 |
+| `LOG_LEVEL` | INFO | 日志级别 |
+| `DATA_DIR` | ./data | 文档存放目录 |
+| `VECTOR_STORE_DIR` | ./vector_store | 向量库持久化目录 |
+| `COLLECTION_NAME` | default_collection | ChromaDB 集合名 |
+
+#### Embedding 与 LLM
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `OLLAMA_BASE_URL` | http://localhost:11434 | Ollama 服务地址 |
+| `EMBEDDING_MODEL_NAME` | bge-m3 | Ollama 本地 Embedding 模型 |
+| `LLM_BASE_URL` | （必填） | OpenAI 兼容 API 地址 |
+| `LLM_API_KEY` | （必填） | API 密钥 |
+| `LLM_MODEL` | （必填） | 默认使用的 LLM 模型名 |
+| `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
+| `LLM_MAX_RETRIES` | 3 | LLM 请求重试次数 |
+
+#### RAG 核心参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `PDF_LOADER` | pypdf | PDF 解析引擎（pypdf / mineru） |
 | `CHUNK_SIZE` | 800 | 分块最大字符数，中文场景 500–1000 较优 |
 | `CHUNK_OVERLAP` | 120 | 相邻块重叠字符数，约 chunk_size 的 15% |
 | `SEARCH_TOP_K` | 4 | 默认检索 Top-K |
@@ -198,10 +236,7 @@ rag-web-system/
 | `DEFAULT_TEMPERATURE` | 0.2 | 低温度确保回答稳定 |
 | `DEFAULT_MAX_TOKENS` | 512 | 生成最大 token |
 | `DEFAULT_TOP_P` | 1.0 | 核采样阈值 |
-| `EMBEDDING_MODEL_NAME` | bge-m3 | Ollama 本地 Embedding 模型 |
 | `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | CrossEncoder 重排序模型 |
-| `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
-| `LLM_MAX_RETRIES` | 3 | LLM 请求重试次数 |
 | `EVAL_BATCH_SIZE` | 8 | RAGAS 评估批大小 |
 
 ### 参数设计理由
@@ -230,6 +265,7 @@ rag-web-system/
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
+| `GET` | `/` | 自动重定向到 `/ui/` |
 | `GET` | `/health` | 健康检查 |
 | `POST` | `/ingest` | 文档入库 |
 | `POST` | `/query` | RAG 问答 |
@@ -288,6 +324,13 @@ pytest tests/test_retrieval.py -v
 1. 在 `app/eval/ragas_eval.py` 的 `evaluate_samples()` 中导入新指标
 2. 将指标添加到 `metrics` 列表
 3. 在 `app/web/gradio_ui.py` 的 `_build_ragas_chart()` 中更新可视化
+4. 若需纳入「优化建议」，在 `get_optimization_suggestions()` 中增加该指标的阈值判断与建议文案
+5. 若需在前端暴露目标，在标准答案评测 UI 中增加 `gr.Number` 目标输入，并传入 `_run_testset`
+
+### 8.5 新增前端参数时
+
+1. 在对应 `gr.Slider` / `gr.Dropdown` / `gr.Checkbox` 上增加 `info="成本：... 效率：..."` 浮窗说明
+2. 在标准答案评测 Tab 的同名控件上同步补充 `info`
 
 ---
 
@@ -329,6 +372,40 @@ python scripts/check_env.py
 
 ---
 
+## 12. 项目经验总结（v0.4 迭代）
+
+以下为项目迭代至 v0.4 时沉淀的经验，便于后续维护与类似项目参考。
+
+### 12.1 产品与运营侧
+
+| 项 | 做法 | 说明 |
+|----|------|------|
+| **成本/效率透明** | 为 Gradio 各参数（分块、检索、生成、模型等）增加 `info` 浮窗 | 鼠标悬停即可看到该参数对成本与效率的影响，便于产品/运营决策 |
+| **指标目标可配置** | 标准答案评测中增加 Faithfulness / Answer Relevancy / Context Recall / Context Precision 四个目标（默认 0.85 / 0.8 / 0.8 / 0.7） | 用户可自行修改；RAGAS 打分低于目标时再给出优化方向建议，避免噪音 |
+| **优化建议与目标绑定** | `get_optimization_suggestions(summary, target_*=...)` 按目标阈值生成建议 | 建议文案中带「当前 x.xx < 目标 x.xx」，便于验收与迭代 |
+
+### 12.2 安全与成本控制
+
+| 项 | 做法 | 说明 |
+|----|------|------|
+| **仅答知识库** | 系统 prompt 明确「仅依据上下文作答」；无上下文时直接返回固定话术、不调用 LLM | 避免通用问答/闲聊消耗 API，防止滥用 |
+| **无上下文不调用 LLM** | `generator.generate()` 在 `contexts` 为空时返回 `NO_CONTEXT_REPLY`，不发起请求 | 节省费用并统一拒绝话术 |
+
+### 12.3 工程与部署
+
+| 项 | 做法 | 说明 |
+|----|------|------|
+| **setuptools 包发现** | 在 `pyproject.toml` 中增加 `[tool.setuptools.packages.find]` 且 `include = ["app*"]` | 项目根目录存在 `data/`、`vector_store/` 等非包目录时，避免被当成多顶层包导致 `pip install -e .` 失败 |
+| **Windows 启动 host** | 开发时使用 `--host 127.0.0.1` 而非 `0.0.0.0`（若遇 WinError 10013） | 部分 Windows 环境下绑定 0.0.0.0 会触发权限错误，127.0.0.1 可正常监听 |
+| **功能/界面预览** | 在 README 中增加「功能/界面预览」区块，按模块依次贴图，并在开头提示浏览者先看预览 | 便于 GitHub 访客快速了解界面与能力；仓库简介可提示「建议先看 README 功能/界面预览」 |
+
+### 12.4 扩展时注意
+
+- 新增检索策略或生成参数时，建议同步在 Gradio 对应控件上增加 `info`（成本/效率一句话）。
+- 新增 RAGAS 相关指标时，若需纳入「优化建议」，在 `get_optimization_suggestions` 中增加对应阈值与建议文案，并在标准答案评测 UI 中暴露目标输入。
+
+---
+
 ## 引用文件索引
 
 | 文件 | 内容 |
@@ -338,3 +415,4 @@ python scripts/check_env.py
 | [`refs/troubleshooting.md`](refs/troubleshooting.md) | 常见报错排查清单 |
 | [`refs/default-params.md`](refs/default-params.md) | 默认参数完整说明及调优建议 |
 | [`refs/implicit-knowledge.md`](refs/implicit-knowledge.md) | 隐性知识：团队约定与运行环境上下文 |
+| [`docs/release-notes-v0.4.md`](../../docs/release-notes-v0.4.md) | v0.4 版本发布说明 |
